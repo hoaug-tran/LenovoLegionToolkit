@@ -113,7 +113,7 @@ public static partial class Compatibility
         { "83NN", LegionSeries.Legion_Pro_5 }, { "82WK", LegionSeries.Legion_Pro_5 },
 
         { "83KY", LegionSeries.Legion_7 }, { "83FD", LegionSeries.Legion_7 }, { "82UH", LegionSeries.Legion_7 },
-        { "82TD", LegionSeries.Legion_7 },
+        { "82TD", LegionSeries.Legion_7 }, { "82N6", LegionSeries.Legion_7 },
 
         { "83RU", LegionSeries.Legion_Pro_7 }, { "83F5", LegionSeries.Legion_Pro_7 }, { "83DE", LegionSeries.Legion_Pro_7 },
         { "82WR", LegionSeries.Legion_Pro_7 }, { "82WQ", LegionSeries.Legion_Pro_7 }, { "82WS", LegionSeries.Legion_Pro_7 },
@@ -208,7 +208,7 @@ public static partial class Compatibility
                 HasGodModeToOtherModeSwitchingBug = GetHasGodModeToOtherModeSwitchingBug(biosVersion),
                 HasReapplyParameterIssue = GetHasReapplyParameterIssue(model),
                 HasSpectrumProfileSwitchingBug = GetHasSpectrumProfileSwitchingBug(model),
-                IsExcludedFromLenovoLighting = GetIsExcludedFromLenovoLighting(biosVersion),
+                IsExcludedFromLenovoLighting = GetIsExcludedFromLenovoLighting(biosVersion, generation, legionSeries),
                 IsExcludedFromPanelLogoLenovoLighting = GetIsExcludedFromPanelLenovoLighting(machineType, model),
                 HasAlternativeFullSpectrumLayout = GetHasAlternativeFullSpectrumLayout(machineType),
                 IsAmdDevice = GetIsAmdDevice(model),
@@ -530,11 +530,19 @@ public static partial class Compatibility
         return lower.Contains("IdeaPad".ToLowerInvariant()) || lower.Contains("ThinkBook".ToLowerInvariant()) || lower.Contains("Lenovo Slim".ToLowerInvariant());
     }
 
+   
+    
     private static int GetMachineGeneration(string model)
     {
-        Match match = Regex.Match(model, @"\d+(?=[A-Z]?H?$)");
+        // Try to detect generation from model suffix (e.g. "16ACHg6").
+        // Some models expose generation as "g<gen>", others don't.
+        var genMatch = Regex.Match(model, @"g(?<gen>\d+)$", RegexOptions.IgnoreCase);
+        if (genMatch.Success)
+            return int.Parse(genMatch.Groups["gen"].Value);
 
-        return match.Success ? Int32.Parse(match.Value) : 0;
+        // Fallback to legacy parsing to keep older naming schemes working.
+        var legacyMatch = Regex.Match(model, @"\d+(?=[A-Z]?H?$)");
+        return legacyMatch.Success ? int.Parse(legacyMatch.Value) : 0;
     }
 
     private static LegionSeries GetLegionSeries(string model, string machineType)
@@ -624,8 +632,22 @@ public static partial class Compatibility
         return isAffectedModel && isAffectedSeries;
     }
 
-    private static bool GetIsExcludedFromLenovoLighting(BiosVersion? biosVersion)
+    // Legion 7 Gen 6 uses firmware-controlled RGB. I'm trying to add support but no luck. 
+    // HID / Lenovo Lighting commands are accepted but ignored by firmware,
+    // so keyboard RGB cannot be controlled reliably here.
+    private static bool GetIsExcludedFromLenovoLighting(BiosVersion? biosVersion, int generation, LegionSeries series)
     {
+        // Avoid showing non-functional RGB settings
+        if (series == LegionSeries.Legion_7 && generation < 10)
+        {
+            if (Log.Instance.IsTraceEnabled)
+            {
+                Log.Instance.Trace($"Legion 7 Gen 6: keyboard RGB is firmware-controlled, Lenovo Lighting disabled");
+            }
+                
+            return true;
+        }
+
         var affectedBiosVersions = new BiosVersion[]
         {
             new("GKCN", 54)
